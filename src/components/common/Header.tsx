@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { SyncService } from '../../services/syncService';
 import { Database, getTodayDateString, subscribeToDatabase } from '../../services/storage';
@@ -28,6 +28,10 @@ export const Header: React.FC<HeaderProps> = ({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
+  // Refs for click-outside detection
+  const notifRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
   // Self-Service Change Password Modal State
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [newPassInput, setNewPassInput] = useState('');
@@ -35,6 +39,38 @@ export const Header: React.FC<HeaderProps> = ({
   const [showPassPlain, setShowPassPlain] = useState(false);
   const [passChangeSuccess, setPassChangeSuccess] = useState<string | null>(null);
   const [passChangeError, setPassChangeError] = useState<string | null>(null);
+
+  // Close popups when clicking outside or pressing Escape
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (notifRef.current && !notifRef.current.contains(target)) {
+        setShowNotifications(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setShowUserMenu(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowNotifications(false);
+        setShowUserMenu(false);
+      }
+    };
+
+    if (showNotifications || showUserMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showNotifications, showUserMenu]);
 
   useEffect(() => {
     const unsubSync = SyncService.subscribe((status, count) => {
@@ -75,6 +111,13 @@ export const Header: React.FC<HeaderProps> = ({
   const markAllAsRead = () => {
     const all = Database.getNotifications();
     const updated = all.map(n => ({ ...n, isRead: true }));
+    Database.setNotifications(updated);
+    setNotifications(updated);
+  };
+
+  const markOneAsRead = (id: string) => {
+    const all = Database.getNotifications();
+    const updated = all.map(n => n.id === id ? { ...n, isRead: true } : n);
     Database.setNotifications(updated);
     setNotifications(updated);
   };
@@ -189,10 +232,13 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Notification Bell */}
-          <div className="relative">
+          <div ref={notifRef} className="relative">
             <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg relative transition-colors"
+              onClick={() => {
+                setShowNotifications(prev => !prev);
+                setShowUserMenu(false);
+              }}
+              className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg relative transition-colors cursor-pointer"
               title="Notifications"
             >
               <Bell className="w-4 h-4" />
@@ -205,17 +251,27 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Notification Dropdown */}
             {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden animate-scaleUp">
                 <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                   <span className="font-bold text-slate-800 text-xs uppercase tracking-wider">In-App Notifications</span>
-                  {unreadCount > 0 && (
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={markAllAsRead}
+                        className="text-[11px] text-brand-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3 h-3" /> Mark all read
+                      </button>
+                    )}
                     <button
-                      onClick={markAllAsRead}
-                      className="text-[11px] text-brand-700 font-semibold hover:underline flex items-center gap-1"
+                      type="button"
+                      onClick={() => setShowNotifications(false)}
+                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
+                      title="Close notifications"
                     >
-                      <CheckCircle2 className="w-3 h-3" /> Mark all read
+                      <X className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  </div>
                 </div>
                 <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
                   {notifications.length === 0 ? (
@@ -224,7 +280,8 @@ export const Header: React.FC<HeaderProps> = ({
                     notifications.map(n => (
                       <div
                         key={n.id}
-                        className={`p-3 text-xs transition-colors ${n.isRead ? 'bg-white opacity-80' : 'bg-blue-50/50 font-medium'}`}
+                        onClick={() => markOneAsRead(n.id)}
+                        className={`p-3 text-xs transition-colors cursor-pointer hover:bg-amber-50/50 ${n.isRead ? 'bg-white opacity-80' : 'bg-blue-50/50 font-medium'}`}
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-slate-800">{n.title}</span>
@@ -242,10 +299,13 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* User Profile & Demo Switcher Dropdown */}
-          <div className="relative">
+          <div ref={userMenuRef} className="relative">
             <button
-              onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 pl-2 pr-1.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-800 border border-slate-200 transition-colors"
+              onClick={() => {
+                setShowUserMenu(prev => !prev);
+                setShowNotifications(false);
+              }}
+              className="flex items-center gap-2 pl-2 pr-1.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-semibold text-slate-800 border border-slate-200 transition-colors cursor-pointer"
             >
               <UserIcon className="w-3.5 h-3.5 text-slate-600" />
               <span className="hidden sm:inline max-w-[110px] truncate">{currentUser.name}</span>
